@@ -22,28 +22,45 @@ module memory_interface #(
     logic [LATENCY-1:0]           rvalid_pipe;
     logic [DATA_WIDTH-1:0]        rdata_pipe [0:LATENCY-1];
 
+    // Initialize response to zero
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-             rvalid_pipe <= '0;
+            rvalid_pipe <= '0;
+            resp_o <= '0;  // Initialize all bits to zero
+            $display("T=%0t [MEM] Reset asserted", $time);
         end else begin
             // Handle requests
             if (req_i.valid) begin
                 if (req_i.write_en) begin
                     mem[req_i.addr] <= req_i.wdata;
+                    resp_o.valid <= 1'b1;  // Acknowledge write immediately
+                    resp_o.rdata <= '0;    // No data for writes
+                    $display("T=%0t [MEM] Store operation - addr=%0d, data=%0d",
+                            $time, req_i.addr, req_i.wdata);
+                end else begin
+                    $display("T=%0t [MEM] Load operation - addr=%0d", $time, req_i.addr);
                 end
+            end else begin
+                resp_o.valid <= 1'b0;
             end
 
-            // Manage latency pipe
+            // Manage latency pipe for reads
             rvalid_pipe[0] <= req_i.valid && !req_i.write_en;
             rdata_pipe[0]  <= mem[req_i.addr];
             for (int i = 1; i < LATENCY; i++) begin
                 rvalid_pipe[i] <= rvalid_pipe[i-1];
                 rdata_pipe[i]  <= rdata_pipe[i-1];
             end
+
+            // Drive read response signals
+            if (!req_i.write_en) begin
+                resp_o.valid <= rvalid_pipe[LATENCY-1];
+                resp_o.rdata <= rdata_pipe[LATENCY-1];
+                if (rvalid_pipe[LATENCY-1]) begin
+                    $display("T=%0t [MEM] Load response - data=%0d", $time, rdata_pipe[LATENCY-1]);
+                end
+            end
         end
     end
-
-    assign resp_o.valid = rvalid_pipe[LATENCY-1];
-    assign resp_o.rdata = rdata_pipe[LATENCY-1];
 
 endmodule

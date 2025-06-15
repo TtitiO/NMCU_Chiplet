@@ -58,9 +58,7 @@ module control_unit_decoder #(
         IDLE,
         EXECUTE_MEM,
         FETCH_OPERAND_A,
-        WAIT_OPERAND_A,
         FETCH_OPERAND_B,
-        WAIT_OPERAND_B,
         EXECUTE_PE,
         STORE_RESULT, // For MAC operation, store the result in the cache
         RESPOND_CPU
@@ -70,6 +68,7 @@ module control_unit_decoder #(
 
     instruction_t current_instruction_reg;
     logic         instruction_valid_reg;
+    logic         req_valid_reg;
 
     logic [DATA_WIDTH-1:0] operand_a_reg, operand_b_reg, result_reg;
 
@@ -85,23 +84,35 @@ module control_unit_decoder #(
             operand_b_reg <= '0;
             result_reg <= '0;
             current_state <= IDLE;
+            req_valid_reg <= 1'b0;
         end else begin
-            if (cpu_instr_valid && cpu_instr_ready) begin
+            if (next_state != current_state) begin
+                req_valid_reg <= 1'b0;
+            // Set the flag once the request has been asserted.
+            end else if (cache_req_o.valid) begin
+                req_valid_reg <= 1'b1;
+            end
+            // Only latch new instruction when in IDLE state and instruction is valid
+            if (current_state == IDLE && cpu_instr_valid && cpu_instr_ready) begin
                 instruction_valid_reg <= 1'b1;
                 current_instruction_reg <= cpu_instruction;
-            end else if (next_state != IDLE) begin
+                // $display("T=%0t [CU] Latching new instruction in IDLE state", $time);
+            end else if (current_state == IDLE && next_state != IDLE) begin
+                // Clear instruction valid when leaving IDLE state
                 instruction_valid_reg <= 1'b0;
             end
 
-            if(current_state == WAIT_OPERAND_A && next_state == FETCH_OPERAND_B) begin
+            if(current_state == FETCH_OPERAND_A && next_state == FETCH_OPERAND_B) begin
                 operand_a_reg <= cache_resp_i.rdata;
+                $display("T=%0t [CU] FETCH_OPERAND_A: Received operand - data=%0d", $time, cache_resp_i.rdata);
             end
 
-            if(current_state == WAIT_OPERAND_B && next_state == EXECUTE_PE) begin
+            if(current_state == FETCH_OPERAND_B && next_state == EXECUTE_PE) begin
                 operand_b_reg <= cache_resp_i.rdata;
+                $display("T=%0t [CU] FETCH_OPERAND_B: Received operand - data=%0d", $time, cache_resp_i.rdata);
             end
 
-            if(current_state == STORE_RESULT && next_state == RESPOND_CPU) begin
+            if (current_state == EXECUTE_PE && next_state == STORE_RESULT) begin
                 result_reg <= pe_result_i;
             end
         end
@@ -132,7 +143,11 @@ module control_unit_decoder #(
             IDLE: begin
                 if (instruction_valid_reg) begin
                     case (current_instruction_reg.opcode)
-                        INSTR_LOAD, INSTR_STORE: next_state = EXECUTE_MEM;
+                        INSTR_LOAD, INSTR_STORE: begin
+                            // $display("T=%0t [CU] IDLE: Received %s instruction", $time,
+                            //        current_instruction_reg.opcode == INSTR_STORE ? "STORE" : "LOAD");
+                            next_state = EXECUTE_MEM;
+                        end
                         INSTR_MAC: next_state = FETCH_OPERAND_A;
                         INSTR_NOP:  next_state = RESPOND_CPU;
                         default: next_state = RESPOND_CPU; // HALT or error
@@ -140,13 +155,17 @@ module control_unit_decoder #(
                 end
             end
             EXECUTE_MEM: begin
-                cache_req_o.valid = 1'b1;
+                // Only assert valid if we haven't received a response yet
+                cache_req_o.valid = !req_valid_reg;
                 cache_req_o.addr = current_instruction_reg.addr_a;
                 cache_req_o.len = current_instruction_reg.len;
                 cache_req_o.write_en = (current_instruction_reg.opcode == INSTR_STORE);
                 cache_req_o.wdata = current_instruction_reg.data;
-                if (cache_resp_i.valid ||(cache_req_o.write_en && cache_req_o.valid)) begin
+
+                if (cache_resp_i.valid && req_valid_reg) begin
                     next_state = RESPOND_CPU;
+                end else begin
+                    next_state = EXECUTE_MEM;
                 end
             end
             EXECUTE_PE: begin
@@ -161,11 +180,13 @@ module control_unit_decoder #(
                 if (pe_cmd_ready_i) begin
                     if (pe_done_i) begin
                         next_state = STORE_RESULT;
+                    end else begin
+                        next_state = EXECUTE_PE;
                     end
                 end
             end
             STORE_RESULT: begin
-                cache_req_o.valid = 1'b1;
+                cache_req_o.valid = !cache_resp_i.valid;
                 cache_req_o.addr = current_instruction_reg.addr_c;
                 cache_req_o.len = current_instruction_reg.len;
                 cache_req_o.write_en = 1'b1;
@@ -179,43 +200,48 @@ module control_unit_decoder #(
                 nmcu_response_o.valid = 1'b1;
 
                 case(current_instruction_reg.opcode)
-                    INSTR_LOAD: nmcu_response_o.data = cache_resp_i.rdata;
+                    INSTR_LOAD: begin
+                        nmcu_response_o.data = cache_resp_i.rdata;
+                        // $display("T=%0t [CU] RESPOND_CPU: LOAD response - data=%0d",
+                        //         $time, cache_resp_i.rdata);
+                    end
+                    INSTR_STORE: begin
+                        // $display("T=%0t [CU] RESPOND_CPU: STORE response - status=%b",
+                        //         $time, nmcu_response_o.status);
+                    end
                     default:    nmcu_response_o.data = '0;
                 endcase
                 nmcu_response_o.status = (current_instruction_reg.opcode == INSTR_HALT) ? 2'b01 : 2'b00;
 
                 if (nmcu_resp_ready_i) begin
+                    // $display("T=%0t [CU] RESPOND_CPU: Response accepted - moving to IDLE", $time);
                     next_state = IDLE;
                 end
             end
             FETCH_OPERAND_A: begin
                 // Issue a read request for the first operand (using addr_a from the instruction)
-                cache_req_o.valid    = 1'b1;
+                cache_req_o.valid    = !req_valid_reg;
                 cache_req_o.write_en = 1'b0;
                 cache_req_o.addr     = current_instruction_reg.addr_a;
                 cache_req_o.len      = current_instruction_reg.len;
-                if (cache_req_o.valid) begin // TODO: Simplified handshake for now, revisit
-                    next_state = WAIT_OPERAND_A;
-                end
-            end
-            WAIT_OPERAND_A: begin
-                if (cache_resp_i.valid) begin
-                    next_state    = FETCH_OPERAND_B;
+
+                if (cache_resp_i.valid && req_valid_reg) begin
+                    next_state = FETCH_OPERAND_B;
+                end else begin
+                    next_state = FETCH_OPERAND_A;
                 end
             end
             FETCH_OPERAND_B: begin
                 // Issue a read request for the second operand (using addr_b from the instruction)
-                cache_req_o.valid    = 1'b1;
+                cache_req_o.valid    = !req_valid_reg;
                 cache_req_o.write_en = 1'b0;
                 cache_req_o.addr     = current_instruction_reg.addr_b;
                 cache_req_o.len      = current_instruction_reg.len;
-                if (cache_req_o.valid) begin // TODO: Simplified handshake for now, revisit
-                    next_state = WAIT_OPERAND_B;
-                end
-            end
-            WAIT_OPERAND_B: begin
-                if (cache_resp_i.valid) begin
-                    next_state    = EXECUTE_PE;
+
+                if (cache_resp_i.valid && req_valid_reg) begin
+                    next_state = EXECUTE_PE;
+                end else begin
+                    next_state = FETCH_OPERAND_B;
                 end
             end
         endcase

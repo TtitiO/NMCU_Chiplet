@@ -17,8 +17,18 @@ module cache_system (
     input  nmcu_pkg::mem_resp_t mem_resp_i
 );
 
-    assign mem_req_o = req_i;
+    always_comb begin
+        mem_req_o = req_i;
+        resp_o = mem_resp_i;
 
-    assign resp_o = mem_resp_i;
+        // Debug prints for store operations
+        // if (req_i.valid && req_i.write_en) begin
+        //     $display("T=%0t [CACHE] Store request - addr=%0d, data=%0d, valid=%b", 
+        //             $time, req_i.addr, req_i.wdata, req_i.valid);
+        // end
+        // if (mem_resp_i.valid) begin
+        //     $display("T=%0t [CACHE] Memory response received - valid=%b", $time, mem_resp_i.valid);
+        // end
+    end
 
 endmodule

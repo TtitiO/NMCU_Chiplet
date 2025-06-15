@@ -1,5 +1,7 @@
 // nmcu_project/src/include/instr_pkg.sv
 // Function: Define instruction format and opcodes from CPU to NMCU
+`ifndef _INSTR_PKG_SV_
+`define _INSTR_PKG_SV_
 package instr_pkg;
     import nmcu_pkg::*;
 
@@ -33,3 +35,5 @@ package instr_pkg;
     } nmcu_cpu_resp_t;
 
 endpackage : instr_pkg
+
+`endif

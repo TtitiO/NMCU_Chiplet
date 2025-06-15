@@ -3,8 +3,6 @@
 //           It receives commands from the control unit and sends them to the PE array.
 //           It also receives results from the PE array and sends them to the control unit.
 
-
-
 `include "nmcu_pkg.sv"
 `include "instr_pkg.sv"
 
@@ -31,14 +29,16 @@ module pe_array_interface #(
     import nmcu_pkg::*;
     import instr_pkg::*;
 
-    logic [DATA_WIDTH-1:0] pe_result_o;
-
     // Instantiate the PE array
     pe_array pe_array_inst (
         .operand_a_i    (pe_operand_a_i),
         .operand_b_i    (pe_operand_b_i),
-        .result_o       (pe_result_o) // Connect result directly to output
+        .result_o       (pe_result) // Connect to internal signal
     );
+
+    // Internal signal for the result
+    logic [DATA_WIDTH-1:0] pe_result;
+
     // This interface is always ready to accept a command.
     assign pe_cmd_ready_o = 1'b1;
 
@@ -47,9 +47,10 @@ module pe_array_interface #(
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             pe_done_o <= 1'b0;
+            pe_result_o <= '0;
         end else begin
             pe_done_o <= pe_cmd_valid_i && pe_cmd_ready_o;
-            pe_result_o <= pe_array_inst.result_o;
+            pe_result_o <= pe_result;
         end
     end
 endmodule

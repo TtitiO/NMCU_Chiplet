@@ -1,5 +1,7 @@
 // nmcu_project/src/include/nmcu_pkg.sv
 // Function: Define common parameters for the NMCU project
+`ifndef _NMCU_PKG_SV_
+`define _NMCU_PKG_SV_
 package nmcu_pkg;
 
     // Common Parameters
@@ -46,3 +48,5 @@ package nmcu_pkg;
     // } handshake_t;
 
 endpackage : nmcu_pkg
+
+`endif
