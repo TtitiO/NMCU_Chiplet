@@ -22,7 +22,8 @@
 module control_unit_decoder #(
     parameter DATA_WIDTH  = nmcu_pkg::DATA_WIDTH,
     parameter ADDR_WIDTH  = nmcu_pkg::ADDR_WIDTH,
-    parameter LEN_WIDTH   = nmcu_pkg::LEN_WIDTH
+    parameter LEN_WIDTH   = nmcu_pkg::LEN_WIDTH,
+    parameter PSUM_WIDTH  = nmcu_pkg::PSUM_WIDTH
 ) (
     input  logic                            clk,
     input  logic                            rst_n,
@@ -37,13 +38,14 @@ module control_unit_decoder #(
     input  nmcu_pkg::mem_resp_t             cache_resp_i,
 
     // To PE Array Interface
+    output logic                            pe_accum_en_o,
+    // output instr_pkg::instruction_t         pe_cmd_o, // metadata for PE interface
     output logic                            pe_cmd_valid_o,
-    output instr_pkg::instruction_t         pe_cmd_o, // metadata for PE interface
-    output logic [DATA_WIDTH-1:0]           pe_operand_a_o,
-    output logic [DATA_WIDTH-1:0]           pe_operand_b_o,
+    output logic [DATA_WIDTH-1:0]           pe_operand_a_o [3:0],
+    output logic [DATA_WIDTH-1:0]           pe_operand_b_o [3:0],
     input  logic                            pe_cmd_ready_i,
     input  logic                            pe_done_i,
-    input  logic [DATA_WIDTH-1:0]           pe_result_i,
+    input  logic [PSUM_WIDTH-1:0]           pe_result_i [3:0][3:0],
 
     // To CPU
     output logic                            nmcu_resp_valid_o,
@@ -60,7 +62,8 @@ module control_unit_decoder #(
         FETCH_OPERAND_A,
         FETCH_OPERAND_B,
         EXECUTE_PE,
-        STORE_RESULT, // For MAC operation, store the result in the cache
+        WAIT_FOR_PE,
+        STORE_RESULT,
         RESPOND_CPU
     } cu_state_t;
 
@@ -70,8 +73,11 @@ module control_unit_decoder #(
     logic         instruction_valid_reg;
     logic         req_valid_reg;
 
-    logic [DATA_WIDTH-1:0] operand_a_reg, operand_b_reg, result_reg;
+    logic [DATA_WIDTH-1:0] operand_a_reg, operand_b_reg;
+    logic [PSUM_WIDTH-1:0] result_reg;
 
+    // Add a counter for PE execution
+    logic [3:0] pe_execution_counter;
 
     assign cpu_instr_ready = (current_state == IDLE);
 
@@ -85,9 +91,14 @@ module control_unit_decoder #(
             result_reg <= '0;
             current_state <= IDLE;
             req_valid_reg <= 1'b0;
+            pe_execution_counter <= '0;
         end else begin
             if (next_state != current_state) begin
                 req_valid_reg <= 1'b0;
+                if (next_state == EXECUTE_PE) begin
+                    pe_execution_counter <= '0;  // Reset counter when entering PE execution
+                    $display("T=%0t [CU] Entering EXECUTE_PE: Operands A=%0d, B=%0d", $time, operand_a_reg, operand_b_reg);
+                end
             // Set the flag once the request has been asserted.
             end else if (cache_req_o.valid) begin
                 req_valid_reg <= 1'b1;
@@ -96,24 +107,29 @@ module control_unit_decoder #(
             if (current_state == IDLE && cpu_instr_valid && cpu_instr_ready) begin
                 instruction_valid_reg <= 1'b1;
                 current_instruction_reg <= cpu_instruction;
-                // $display("T=%0t [CU] Latching new instruction in IDLE state", $time);
             end else if (current_state == IDLE && next_state != IDLE) begin
                 // Clear instruction valid when leaving IDLE state
                 instruction_valid_reg <= 1'b0;
             end
 
-            if(current_state == FETCH_OPERAND_A && next_state == FETCH_OPERAND_B) begin
+            if(current_state == FETCH_OPERAND_A && cache_resp_i.valid && req_valid_reg) begin
                 operand_a_reg <= cache_resp_i.rdata;
                 $display("T=%0t [CU] FETCH_OPERAND_A: Received operand - data=%0d", $time, cache_resp_i.rdata);
             end
 
-            if(current_state == FETCH_OPERAND_B && next_state == EXECUTE_PE) begin
+            if(current_state == FETCH_OPERAND_B && cache_resp_i.valid && req_valid_reg) begin
                 operand_b_reg <= cache_resp_i.rdata;
                 $display("T=%0t [CU] FETCH_OPERAND_B: Received operand - data=%0d", $time, cache_resp_i.rdata);
             end
 
-            if (current_state == EXECUTE_PE && next_state == STORE_RESULT) begin
-                result_reg <= pe_result_i;
+            if (current_state == EXECUTE_PE) begin
+                pe_execution_counter <= pe_execution_counter + 1;
+                $display("T=%0t [CU] EXECUTE_PE: Counter=%0d", $time, pe_execution_counter);
+            end
+
+            if (current_state == WAIT_FOR_PE && pe_done_i) begin
+                result_reg <= pe_result_i[0][0];
+                $display("T=%0t [CU] WAIT_FOR_PE: Latched PE result - data=%0d", $time, pe_result_i[0][0]);
             end
         end
     end
@@ -133,11 +149,12 @@ module control_unit_decoder #(
         // Default outputs
         cache_req_o       = '0;
         pe_cmd_valid_o    = 1'b0;
-        pe_cmd_o          = '0;
-        pe_operand_a_o    = '0;
-        pe_operand_b_o    = '0;
+        // pe_cmd_o          = '0;
         nmcu_resp_valid_o = 1'b0;
         nmcu_response_o = '0;
+        pe_accum_en_o     = 1'b0;
+        pe_operand_a_o    = '{default: '0};
+        pe_operand_b_o    = '{default: '0};
 
         unique case (current_state)
             IDLE: begin
@@ -169,29 +186,29 @@ module control_unit_decoder #(
                 end
             end
             EXECUTE_PE: begin
-                // Pass metadata
-                pe_cmd_o       = current_instruction_reg;
-                // Drive the actual data on the new dedicated ports.
-                pe_operand_a_o = operand_a_reg;
-                pe_operand_b_o = operand_b_reg;
-                // Assert valid to signal that the command AND data are ready.
-                pe_cmd_valid_o = 1'b1;
+                pe_cmd_valid_o = (pe_execution_counter == 1);
+                // pe_cmd_o       = current_instruction_reg;
+                pe_accum_en_o  = 1'b1;
+                pe_operand_a_o[0] = operand_a_reg;
+                pe_operand_b_o[0] = operand_b_reg;
 
-                if (pe_cmd_ready_i) begin
-                    if (pe_done_i) begin
-                        next_state = STORE_RESULT;
-                    end else begin
-                        next_state = EXECUTE_PE;
-                    end
+                if (pe_execution_counter == 4) begin
+                    next_state = WAIT_FOR_PE;
+                end
+            end
+            WAIT_FOR_PE: begin
+                if (pe_done_i) begin
+                    next_state = STORE_RESULT;
                 end
             end
             STORE_RESULT: begin
-                cache_req_o.valid = !cache_resp_i.valid;
+                cache_req_o.valid = !req_valid_reg;
                 cache_req_o.addr = current_instruction_reg.addr_c;
                 cache_req_o.len = current_instruction_reg.len;
                 cache_req_o.write_en = 1'b1;
-                cache_req_o.wdata = result_reg;
-                if(cache_req_o.valid) begin
+                cache_req_o.wdata    = result_reg[DATA_WIDTH-1:0]; // Truncate to write to memory
+
+                if (cache_resp_i.valid && req_valid_reg) begin
                     next_state = RESPOND_CPU;
                 end
             end

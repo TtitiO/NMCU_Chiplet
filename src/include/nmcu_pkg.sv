@@ -8,6 +8,7 @@ package nmcu_pkg;
     parameter DATA_WIDTH      = 32;       // Data bus width (e.g., for integers or floats)
     parameter ADDR_WIDTH      = 32;       // Address bus width
     parameter LEN_WIDTH       = 8;        // Length/burst size width
+    parameter PSUM_WIDTH      = 2 * DATA_WIDTH;
 
     // PE Array Parameters
     parameter PE_ROWS         = 4;        // Number of PE rows (for future Systolic Array)

@@ -154,7 +154,7 @@ nmcu_project/
 ```
 
 ## Features
-- [ ] Implement Basic structure of NMCU
+- [x] Implement Basic structure of NMCU
 - [ ] Implement systolic array with 4x4 PE array
     - [ ] change PE size to user-defined
 - [ ] Implement complete cache module design

@@ -1,4 +1,5 @@
 // Function: Testbench for the top-level NMCU module.
+// Revision: Updated to demonstrate 4x4 matrix multiplication using systolic array
 `timescale 1ns / 1ps
 
 module nmcu_tb;
@@ -6,21 +7,51 @@ module nmcu_tb;
     import nmcu_pkg::*;
     import instr_pkg::*;
 
-    // Clock and Reset
+    // --- Testbench Parameters ---
+    localparam TIMEOUT_CYCLES = 5000; // Max cycles to wait for a response
+    localparam MATRIX_SIZE = 4;       // 4x4 matrix size
+
+    // --- Clock and Reset ---
     logic clk;
     logic rst_n;
 
-    // DUT Interface
-    logic            cpu_instr_valid;
+    // --- DUT Interface ---
+    logic                       cpu_instr_valid;
     instr_pkg::instruction_t    cpu_instruction;
-    logic            cpu_instr_ready;
-    logic            nmcu_resp_valid;
-    logic            nmcu_resp_ready;
+    logic                       cpu_instr_ready;
+    logic                       nmcu_resp_valid;
+    logic                       nmcu_resp_ready;
     instr_pkg::nmcu_cpu_resp_t  nmcu_response;
 
-    // Instantiate DUT
+    // --- Test Matrices ---
+    // Matrix A: 4x4 input matrix
+    logic [DATA_WIDTH-1:0] matrix_a [0:3][0:3] = '{
+        '{1, 2, 3, 4},
+        '{5, 6, 7, 8},
+        '{9, 10, 11, 12},
+        '{13, 14, 15, 16}
+    };
+
+    // Matrix B: 4x4 input matrix
+    logic [DATA_WIDTH-1:0] matrix_b [0:3][0:3] = '{
+        '{1, 5, 9, 13},
+        '{2, 6, 10, 14},
+        '{3, 7, 11, 15},
+        '{4, 8, 12, 16}
+    };
+
+    // Expected result matrix (A * B)
+    logic [PSUM_WIDTH-1:0] expected_result [0:3][0:3] = '{
+        '{90, 202, 314, 426},
+        '{202, 458, 714, 970},
+        '{314, 714, 1114, 1514},
+        '{426, 970, 1514, 2058}
+    };
+
+    // --- Instantiate DUT ---
     nmcu dut (
-        .clk(clk), .rst_n(rst_n),
+        .clk(clk),
+        .rst_n(rst_n),
         .cpu_instr_valid(cpu_instr_valid),
         .cpu_instruction(cpu_instruction),
         .cpu_instr_ready(cpu_instr_ready),
@@ -29,10 +60,10 @@ module nmcu_tb;
         .nmcu_response_o(nmcu_response)
     );
 
-    // Clock generation
+    // --- Clock Generation ---
     always #5 clk = ~clk;
 
-    // Main test sequence
+    // --- Main Test Sequence ---
     initial begin
         // 1. Initialization
         clk = 0;
@@ -41,95 +72,123 @@ module nmcu_tb;
         cpu_instruction = '0;
         nmcu_resp_ready = 1'b1; // Always ready to accept response
 
-        $display("T=%0t [TB] Starting Simulation...", $time);
+        $display("T=%0t [%m] Starting Simulation...", $time);
 
-        // 2. Reset sequence
+        // 2. Reset Sequence
         #10;
         rst_n = 1;
-        $display("T=%0t [TB] Reset released.", $time);
-        @(posedge clk); // Allow one clock for DUT to come out of reset properly
-        @(posedge clk); // Additional clock to ensure control unit is in IDLE state
+        $display("T=%0t [%m] Reset released.", $time);
+        @(posedge clk);
+        @(posedge clk); // Ensure control unit is in IDLE state
 
-        // 3. Test sequence
-        // Test 1: Store value 55 to addr 100, and 2 to addr 101
-        send_instr(INSTR_STORE, 100, 0, 0, 55, 1);
-        wait_for_response();
-        send_instr(INSTR_STORE, 101, 0, 0, 2, 1);
-        wait_for_response();
+        // 3. Test Sequence - Matrix Multiplication
+        $display("T=%0t [%m] ====== Loading Matrix A ======", $time);
+        for (int i = 0; i < MATRIX_SIZE; i++) begin
+            for (int j = 0; j < MATRIX_SIZE; j++) begin
+                send_instr(INSTR_STORE, i*MATRIX_SIZE + j, 0, 0, matrix_a[i][j], 1);
+                wait_for_response();
+            end
+        end
 
-        // Test 2: Load value from addr 100 and check
-        send_instr(INSTR_LOAD, 100, 0, 0, 0, 1);
-        wait_for_response();
-        if (received_data == 55) $display("T=%0t [TB] LOAD test PASSED.", $time);
-        else $display("T=%0t [TB] LOAD test FAILED. Expected 55, got %0d", $time, received_data);
+        $display("T=%0t [%m] ====== Loading Matrix B ======", $time);
+        for (int i = 0; i < MATRIX_SIZE; i++) begin
+            for (int j = 0; j < MATRIX_SIZE; j++) begin
+                send_instr(INSTR_STORE, 100 + i*MATRIX_SIZE + j, 0, 0, matrix_b[i][j], 1);
+                wait_for_response();
+            end
+        end
 
-        send_instr(INSTR_LOAD, 101, 0, 0, 0, 1);
-        wait_for_response();
-        if (received_data == 2) $display("T=%0t [TB] LOAD test PASSED.", $time);
-        else $display("T=%0t [TB] LOAD test FAILED. Expected 2, got %0d", $time, received_data);
+        $display("T=%0t [%m] ====== Performing Matrix Multiplication ======", $time);
+        // Perform MAC operation for each element in the result matrix
+        for (int i = 0; i < MATRIX_SIZE; i++) begin
+            for (int j = 0; j < MATRIX_SIZE; j++) begin
+                // Calculate the result address
+                int result_addr = 200 + i*MATRIX_SIZE + j;
+                // Perform MAC operation
+                send_instr(INSTR_MAC, i*MATRIX_SIZE, 100 + j*MATRIX_SIZE, result_addr, 0, MATRIX_SIZE);
+                wait_for_response();
+                if (received_status != 2'b00)
+                    $fatal(1, "T=%0t [%m] FATAL: MAC operation FAILED at position [%0d][%0d]. Status: %b", 
+                           $time, i, j, received_status);
+            end
+        end
 
-        // Test 3: Perform MAC and check for completion
-        send_instr(INSTR_MAC, 100, 101, 200, 0, 1);
-        wait_for_response();
-        if(received_status == 2'b00) // Use received_status
-            $display("T=%0t [TB] MAC operation reported complete.", $time);
-        else
-            $display("T=%0t [TB] MAC operation FAILED. Status: %b", $time, received_status);
-
-        // Test 4: Load the result of the MAC and verify
-        send_instr(INSTR_LOAD, 200, 0, 0, 0, 1);
-        wait_for_response();
-        if (received_data == 110 && received_status == 2'b00) // Use received_data and received_status
-            $display("T=%0t [TB] MAC result test PASSED.", $time);
-        else
-            $display("T=%0t [TB] MAC result test FAILED. Expected 110 (OK), got %0d (%b)", $time, received_data, received_status);
+        $display("T=%0t [%m] ====== Verifying Results ======", $time);
+        // Verify each element of the result matrix
+        for (int i = 0; i < MATRIX_SIZE; i++) begin
+            for (int j = 0; j < MATRIX_SIZE; j++) begin
+                send_instr(INSTR_LOAD, 200 + i*MATRIX_SIZE + j, 0, 0, 0, 1);
+                wait_for_response();
+                if (received_data != expected_result[i][j]) begin
+                    $fatal(1, "T=%0t [%m] FATAL: Result mismatch at [%0d][%0d]. Expected %0d, got %0d", 
+                           $time, i, j, expected_result[i][j], received_data);
+                end
+                $display("T=%0t [%m] INFO: Result at [%0d][%0d] = %0d (PASSED)", 
+                        $time, i, j, received_data);
+            end
+        end
 
         // 4. Finish simulation
         #100;
-        $display("T=%0t [TB] Simulation finished.", $time);
+        $display("T=%0t [%m] Simulation finished successfully.", $time);
         $finish;
     end
 
-    // Task to send an instruction to the DUT. It now waits robustly.
-    task automatic send_instr(input opcode_t op, input logic [ADDR_WIDTH-1:0] addr_a, input logic [ADDR_WIDTH-1:0] addr_b, input logic [ADDR_WIDTH-1:0] addr_c, input logic [DATA_WIDTH-1:0] data, input logic [LEN_WIDTH-1:0]  len);
-        $display("T=%0t [TB] Waiting for cpu_instr_ready...", $time);
+    // Task to send an instruction, with simplified timeout logic.
+    task automatic send_instr(
+        input opcode_t op,
+        input logic [ADDR_WIDTH-1:0] addr_a,
+        input logic [ADDR_WIDTH-1:0] addr_b,
+        input logic [ADDR_WIDTH-1:0] addr_c,
+        input logic [DATA_WIDTH-1:0] data,
+        input logic [LEN_WIDTH-1:0]  len
+    );
+        int timeout_counter = 0;
+        $display("T=%0t [%m] Waiting for cpu_instr_ready...", $time);
         while (!cpu_instr_ready) begin
+            if (timeout_counter > TIMEOUT_CYCLES) begin
+                $fatal(1, "T=%0t [%m] FATAL: Timeout waiting for cpu_instr_ready. DUT may be stuck.", $time);
+            end
+            timeout_counter++;
             @(posedge clk);
         end
-        $display("T=%0t [TB] cpu_instr_ready received, sending instruction...", $time);
 
+        $display("T=%0t [%m] cpu_instr_ready received, sending instruction...", $time);
         cpu_instr_valid = 1;
-        cpu_instruction = '{op, addr_a, addr_b, addr_c, data, len};
+        cpu_instruction = '{
+            opcode: op,
+            addr_a: addr_a,
+            addr_b: addr_b,
+            addr_c: addr_c,
+            data:   data,
+            len:    len
+        };
         @(posedge clk);
         cpu_instr_valid = 0;
-        $display("T=%0t [TB] Instruction sent.", $time);
+        $display("T=%0t [%m] Instruction sent.", $time);
     endtask
 
-        // Add local variables to store the received data and status
+    // Local variables to capture the response from the DUT.
     logic [DATA_WIDTH-1:0] received_data;
-    logic [1:0]  received_status; // Assuming response_status_t is defined
+    logic [1:0]            received_status;
 
+    // Task to wait for a response, with simplified timeout logic.
     task automatic wait_for_response();
-        $display("T=%0t [TB] Waiting for response...", $time);
-        while(!nmcu_resp_valid) begin
+        int timeout_counter = 0;
+        $display("T=%0t [%m] Waiting for response...", $time);
+        while (!nmcu_resp_valid) begin
+            if (timeout_counter > TIMEOUT_CYCLES) begin
+                $fatal(1, "T=%0t [%m] FATAL: Timeout waiting for nmcu_resp_valid. DUT did not respond.", $time);
+            end
+            timeout_counter++;
             @(posedge clk);
         end
-        // Capture the response data and status *immediately* when valid is high
-        received_data = nmcu_response.data;
+
+        received_data   = nmcu_response.data;
         received_status = nmcu_response.status;
+        $display("T=%0t [%m] Response received. Data: %0d, Status: %b", $time, received_data, received_status);
 
-        $display("T=%0t [TB] Response received from DUT. Data: %0d, Status: %b", $time, received_data, received_status);
-        // Acknowledge the response by pulsing nmcu_resp_ready if needed,
-        // or just letting it clear itself if the DUT clears after a cycle.
-        // If nmcu_resp_ready is a handshake signal, you might need:
-        // nmcu_resp_ready = 1; // Assert ready
         @(posedge clk);
-        // nmcu_resp_ready = 0; // De-assert ready (if it's a pulse)
-
-        // For your current setup, where nmcu_resp_ready is always 1,
-        // the additional @(posedge clk) might just be to advance time for the DUT
-        // to clear the valid signal, which is fine, as long as you've captured the data.
     endtask
-
 
 endmodule
