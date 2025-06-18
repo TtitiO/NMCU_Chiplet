@@ -7,7 +7,9 @@ module nmcu #(
     parameter DATA_WIDTH  = nmcu_pkg::DATA_WIDTH,
     parameter ADDR_WIDTH  = nmcu_pkg::ADDR_WIDTH,
     parameter LEN_WIDTH   = nmcu_pkg::LEN_WIDTH,
-    parameter PSUM_WIDTH  = nmcu_pkg::PSUM_WIDTH
+    parameter PSUM_WIDTH  = nmcu_pkg::PSUM_WIDTH,
+    parameter PE_ROWS     = nmcu_pkg::PE_ROWS,
+    parameter PE_COLS     = nmcu_pkg::PE_COLS
 )(
     input  logic                            clk,
     input  logic                            rst_n,
@@ -25,19 +27,22 @@ module nmcu #(
     nmcu_pkg::mem_resp_t cache_mem_resp;
 
     // --- Wires for CU <-> PE Interface Connection ---
-    logic                         pe_accum_en;
-    logic [DATA_WIDTH-1:0]        pe_operand_a [3:0];
-    logic [DATA_WIDTH-1:0]        pe_operand_b [3:0];
-    logic [PSUM_WIDTH-1:0]        pe_result [3:0][3:0];
+    logic [PE_ROWS-1:0]               pe_accum_en;
+    logic [DATA_WIDTH-1:0]        pe_operand_a [PE_ROWS-1:0];
+    logic [DATA_WIDTH-1:0]        pe_operand_b [PE_COLS-1:0];
+    logic [PSUM_WIDTH-1:0]        pe_result [PE_ROWS-1:0][PE_COLS-1:0];
     logic                         pe_cmd_valid;
     logic                         pe_cmd_ready;
     logic                         pe_done;
-    // instr_pkg::instruction_t      pe_cmd;
 
     // Instantiate Control Unit
     control_unit_decoder #(
         .DATA_WIDTH(DATA_WIDTH),
-        .PSUM_WIDTH(PSUM_WIDTH)
+        .ADDR_WIDTH(ADDR_WIDTH),
+        .LEN_WIDTH(LEN_WIDTH),
+        .PSUM_WIDTH(PSUM_WIDTH),
+        .PE_ROWS(PE_ROWS),
+        .PE_COLS(PE_COLS)
     ) cu_inst (
         .clk(clk), .rst_n(rst_n),
         .cpu_instr_valid(cpu_instr_valid),
@@ -48,7 +53,6 @@ module nmcu #(
         .pe_accum_en_o(pe_accum_en),
         .pe_operand_a_o(pe_operand_a),
         .pe_operand_b_o(pe_operand_b),
-        // .pe_cmd_o(pe_cmd),
         .pe_cmd_valid_o(pe_cmd_valid),
         .pe_cmd_ready_i(pe_cmd_ready),
         .pe_done_i(pe_done),
@@ -60,7 +64,9 @@ module nmcu #(
 
     pe_array_interface #(
         .DATA_WIDTH(DATA_WIDTH),
-        .PSUM_WIDTH(PSUM_WIDTH)
+        .PSUM_WIDTH(PSUM_WIDTH),
+        .PE_ROWS(PE_ROWS),
+        .PE_COLS(PE_COLS)
     ) pe_if_inst (
         .clk(clk),
         .rst_n(rst_n),

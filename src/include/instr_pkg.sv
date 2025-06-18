@@ -10,7 +10,7 @@ package instr_pkg;
         INSTR_NOP       = 4'h0,
         INSTR_LOAD      = 4'h1, // Load data from memory to internal register/cache
         INSTR_STORE     = 4'h2, // Store data from internal register/cache to memory
-        INSTR_MAC       = 4'h3, // Matrix Multiply-Accumulate or similar AI operation
+        INSTR_MATMUL    = 4'h3, // Matrix Multiply-Accumulate or similar AI operation
         INSTR_HALT      = 4'hF  // Halt operation
     } opcode_t;
 
@@ -22,9 +22,11 @@ package instr_pkg;
         logic [ADDR_WIDTH-1:0] addr_a; // Base address for operand A (or dest for load/store)
         logic [ADDR_WIDTH-1:0] addr_b; // Base address for operand B (or source for store)
         logic [ADDR_WIDTH-1:0] addr_c; // Base address for result C
-        logic [DATA_WIDTH-1:0] data;   // General purpose data (e.g., store value,
-                                       // dimensions M,N,K for MAC)
-        logic [LEN_WIDTH-1:0]  len;    // Length/size for load/store or sub-dimensions for MAC
+        logic [LEN_WIDTH-1:0]  len;    // Length of the data to be loaded/stored
+        logic [LEN_WIDTH-1:0]  N;      // Dimension N (Rows of A, Rows of C)
+        logic [LEN_WIDTH-1:0]  M;      // Dimension M (Cols of B, Cols of C)
+        logic [LEN_WIDTH-1:0]  K;      // Dimension K (Cols of A, Rows of B)
+        logic [DATA_WIDTH-1:0] data;   // General purpose data (e.g., store value)
     } instruction_t;
 
     // NMCU response to CPU

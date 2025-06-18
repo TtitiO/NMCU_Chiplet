@@ -32,7 +32,7 @@ int main(int argc, char** argv) {
 
     // Main simulation loop
     // Loop until $finish is called from SystemVerilog or a time limit is reached
-    while (!Verilated::gotFinish() && main_time < 10000000) { // Example time limit: 1ms (1,000,000 ps)
+    while (!Verilated::gotFinish() && main_time < 1000000000) { // Example time limit: 1ms (1,000,000 ps)
         // You generally advance time by the smallest time unit defined in your timescale (1ps)
         // or by a fixed number of clock cycles, then evaluate.
         // For this simple case, just advancing by 1 unit and evaluating works.

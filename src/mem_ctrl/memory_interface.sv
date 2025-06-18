@@ -27,7 +27,6 @@ module memory_interface #(
         if (!rst_n) begin
             rvalid_pipe <= '0;
             resp_o <= '0;  // Initialize all bits to zero
-            $display("T=%0t [MEM] Reset asserted", $time);
         end else begin
             // Handle requests
             if (req_i.valid) begin
@@ -35,10 +34,6 @@ module memory_interface #(
                     mem[req_i.addr] <= req_i.wdata;
                     resp_o.valid <= 1'b1;  // Acknowledge write immediately
                     resp_o.rdata <= '0;    // No data for writes
-                    $display("T=%0t [MEM] Store operation - addr=%0d, data=%0d",
-                            $time, req_i.addr, req_i.wdata);
-                end else begin
-                    $display("T=%0t [MEM] Load operation - addr=%0d", $time, req_i.addr);
                 end
             end else begin
                 resp_o.valid <= 1'b0;
@@ -56,9 +51,6 @@ module memory_interface #(
             if (!req_i.write_en) begin
                 resp_o.valid <= rvalid_pipe[LATENCY-1];
                 resp_o.rdata <= rdata_pipe[LATENCY-1];
-                if (rvalid_pipe[LATENCY-1]) begin
-                    $display("T=%0t [MEM] Load response - data=%0d", $time, rdata_pipe[LATENCY-1]);
-                end
             end
         end
     end

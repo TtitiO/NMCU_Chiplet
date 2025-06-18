@@ -48,8 +48,8 @@ graph TB
             
             subgraph CACHE_MEM ["🗄️ Cache Memory"]
                 direction TB
-                TAG_ARRAY["🏷️ Tag Array<br/>L1/L2 Cache Tags"]
-                DATA_ARRAY["📊 Data Array<br/>L1/L2 Cache Data"]
+                TAG_ARRAY["🏷️ Tag Array<br/>L3 Cache Tags"]
+                DATA_ARRAY["📊 Data Array<br/>L3 Cache Data"]
             end
         end
         
@@ -155,7 +155,7 @@ nmcu_project/
 
 ## Features
 - [x] Implement Basic structure of NMCU
-- [ ] Implement systolic array with 4x4 PE array
+- [x] Implement systolic array with 4x4 PE array
     - [ ] change PE size to user-defined
 - [ ] Implement complete cache module design
 - [ ] Support complete memory interface

@@ -11,14 +11,14 @@ package nmcu_pkg;
     parameter PSUM_WIDTH      = 2 * DATA_WIDTH;
 
     // PE Array Parameters
-    parameter PE_ROWS         = 4;        // Number of PE rows (for future Systolic Array)
-    parameter PE_COLS         = 4;        // Number of PE columns (for future Systolic Array)
+    parameter PE_ROWS         = 2;        // Number of PE rows (for future Systolic Array)
+    parameter PE_COLS         = 2;        // Number of PE columns (for future Systolic Array)
     parameter MAC_DATA_WIDTH  = DATA_WIDTH; // Data width for MAC operations (input/output)
 
     // Cache Parameters (TODO: simplified for now, revisit for future)
     parameter CACHE_LINE_SIZE = 64;       // Cache line size in bytes (for future)
     parameter CACHE_NUM_SETS  = 256;      // Number of cache sets (for future)
-    parameter MEM_SIZE_WORDS  = 16384;    // 16K words for TB simulation
+    parameter MEM_SIZE_WORDS  = 65536;    // 64K words for TB simulation
     parameter MEM_LATENCY     = 5;        // Latency for simulated main memory
 
     // Derived Parameters
