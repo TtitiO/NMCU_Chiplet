@@ -149,6 +149,7 @@ module control_unit_decoder #(
             stream_counter <= stream_counter_next;
             flush_counter <= flush_counter_next;
 
+            `ifdef DEBUG_MODE
             // --- Logging Logic ---
             // Log when MATMUL is initialized
             if (current_state == INIT_MATMUL && next_state == FETCH_A_TILE) begin
@@ -194,6 +195,8 @@ module control_unit_decoder #(
                         $display("T=%0t [CU] RESPOND_CPU: Instruction completed, moving to IDLE", $time);
                 endcase
             end
+
+            `endif // DEBUG
         end
     end
 

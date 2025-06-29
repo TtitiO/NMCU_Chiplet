@@ -21,14 +21,16 @@ module memory_interface #(
     // Latency pipe for read data
     logic [LATENCY-1:0]           rvalid_pipe;
     logic [DATA_WIDTH-1:0]        rdata_pipe [0:LATENCY-1];
+    logic [ADDR_WIDTH-1:0]        raddr_pipe [0:LATENCY-1];
 
     // Initialize response to zero
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             rvalid_pipe <= '0;
-            resp_o <= '0;  // Initialize all bits to zero
+            resp_o <= '0;
         end else begin
             // Handle requests
+            resp_o.valid <= 1'b0;
             if (req_i.valid) begin
                 if (req_i.write_en) begin
                     mem[req_i.addr] <= req_i.wdata;
@@ -42,15 +44,19 @@ module memory_interface #(
             // Manage latency pipe for reads
             rvalid_pipe[0] <= req_i.valid && !req_i.write_en;
             rdata_pipe[0]  <= mem[req_i.addr];
+            raddr_pipe[0] <= req_i.addr;
             for (int i = 1; i < LATENCY; i++) begin
                 rvalid_pipe[i] <= rvalid_pipe[i-1];
                 rdata_pipe[i]  <= rdata_pipe[i-1];
+                raddr_pipe[i]  <= raddr_pipe[i-1];
             end
 
             // Drive read response signals
             if (!req_i.write_en) begin
                 resp_o.valid <= rvalid_pipe[LATENCY-1];
                 resp_o.rdata <= rdata_pipe[LATENCY-1];
+                resp_o.addr  <= raddr_pipe[LATENCY-1];
+                resp_o.hit   <= 1'b1;
             end
         end
     end

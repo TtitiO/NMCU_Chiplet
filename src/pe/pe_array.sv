@@ -62,7 +62,6 @@ module systolic_pe #(
         end else if (accum_en_reg) begin
             if (operand_a_reg != '0 || operand_b_reg != '0) begin
                 psum_reg <= psum_reg + mult_result;
-                // $display("T=%0t [PE-DEBUG] psum_reg=%0d+%0d*%0d=%0d+%0d=%0d", $time, psum_reg, operand_a_reg, operand_b_reg, psum_reg, mult_result, psum_reg + mult_result);
             end
         end else begin
             psum_reg <= mult_result;
