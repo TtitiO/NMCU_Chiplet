@@ -24,7 +24,7 @@ package nmcu_pkg;
     // Centralized here from the testbench for consistency.
     // C[BATCH_SIZE][OUTPUT_NEURONS] = A[BATCH_SIZE][INPUT_FEATURES] * B[INPUT_FEATURES][OUTPUT_NEURONS]
     parameter BATCH_SIZE        = 4;   // How many input vectors to process at once (N)
-    parameter INPUT_FEATURES    = 8;   // Dimension of the input vector (K)
+    parameter INPUT_FEATURES    = 4;   // Dimension of the input vector (K)
     parameter OUTPUT_NEURONS    = 4;   // Dimension of the output vector (M)
 
     // --- PE Array Parameters ---
@@ -40,6 +40,10 @@ package nmcu_pkg;
     typedef logic [DATA_WIDTH-1:0] input_matrix_t  [0:BATCH_SIZE-1][0:INPUT_FEATURES-1];
     typedef logic [DATA_WIDTH-1:0] weight_matrix_t [0:INPUT_FEATURES-1][0:OUTPUT_NEURONS-1];
     typedef logic [PSUM_WIDTH-1:0] output_matrix_t [0:BATCH_SIZE-1][0:OUTPUT_NEURONS-1];
+
+    // --- Add basic type definitions for clarity and correctness ---
+    typedef logic [DATA_WIDTH-1:0] data_type; // Standard data word
+    typedef logic [PSUM_WIDTH-1:0] psu_type; // Partial sum accumulator
 
     // Define common AXI-like interfaces for internal communication
     // Request/Response structure for memory operations
