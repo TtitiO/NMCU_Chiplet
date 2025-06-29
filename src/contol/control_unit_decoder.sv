@@ -67,7 +67,7 @@ module control_unit_decoder #(
         FETCH_A_TILE,       // Fetch a tile of matrix A
         FETCH_B_TILE,       // Fetch a tile of matrix B
         STREAM_PE_DATA,     // Stream A and B elements to PEs
-        WAIT_FOR_PE_FLUSH,   // New state to wait for systolic array pipeline to drain
+        // WAIT_FOR_PE_FLUSH,   // New state to wait for systolic array pipeline to drain
         LATCH_PE_RESULTS,   // Latch results from PEs
         UPDATE_TILE_ADDRS,  // Move to the next tile (increment k_tile) or next output block (i_tile, j_tile)
         STORE_C_TILE,       // Store the computed C tile
@@ -291,7 +291,6 @@ module control_unit_decoder #(
                 i_tile_next = 0;
                 j_tile_next = 0;
                 k_tile_next = 0;
-                // pe_accum_en_o = 1'b0; // Disable accumulation for the new MATMUL operation
                 next_state = FETCH_A_TILE; // Start fetching the first tile of A
                 fetch_counter_next = 0;
             end
