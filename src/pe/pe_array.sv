@@ -6,7 +6,7 @@
 `include "instr_pkg.sv"
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// Corrected Processing Element (PE)
+// Processing Element (PE)
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 module systolic_pe #(
     parameter DATA_WIDTH = nmcu_pkg::DATA_WIDTH,
@@ -15,6 +15,7 @@ module systolic_pe #(
     input  logic                    clk,
     input  logic                    rst_n,
     input  logic                    accum_en_i,     // Control signal to enable accumulation
+    output logic                    accum_en_o,     // Output to next PE
 
     // Dataflow inputs
     input  logic [DATA_WIDTH-1:0]   operand_a_i,    // Input from left
@@ -35,6 +36,7 @@ module systolic_pe #(
     logic [PSUM_WIDTH-1:0] psum_reg;
 
     logic signed [PSUM_WIDTH-1:0] mult_result;
+    logic                  accum_en_reg;
 
     // Pipeline the incoming operands. This creates the one-cycle delay needed
     // for the systolic movement of data.
@@ -42,9 +44,11 @@ module systolic_pe #(
         if (!rst_n) begin
             operand_a_reg <= '0;
             operand_b_reg <= '0;
+            accum_en_reg  <= 1'b0;
         end else begin
             operand_a_reg <= operand_a_i;
             operand_b_reg <= operand_b_i;
+            accum_en_reg  <= accum_en_i;
         end
     end
 
@@ -55,34 +59,38 @@ module systolic_pe #(
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             psum_reg <= '0;
-        end else if (accum_en_i) begin
-            psum_reg <= psum_reg + mult_result;
+        end else if (accum_en_reg) begin
+            if (operand_a_reg != '0 || operand_b_reg != '0) begin
+                psum_reg <= psum_reg + mult_result;
+            end
+        end else begin
+            psum_reg <= mult_result;
         end
-        // If accum_en_i is de-asserted, the register holds its value.
     end
 
     // The outputs are the registered values, passed to the next PE in the grid.
     assign operand_a_o = operand_a_reg;
     assign operand_b_o = operand_b_reg;
     assign result_o    = psum_reg; // Output the current accumulated value.
+    assign accum_en_o = accum_en_reg;
 
 endmodule
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// Corrected 4x4 Systolic Array
+// Generic Systolic Array
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 module pe_array #(
     parameter DATA_WIDTH = nmcu_pkg::DATA_WIDTH,
     parameter PSUM_WIDTH = nmcu_pkg::PSUM_WIDTH,
-    parameter ROWS = 4,
-    parameter COLS = 4
+    parameter ROWS = nmcu_pkg::PE_ROWS,
+    parameter COLS = nmcu_pkg::PE_COLS
 ) (
     input  logic                         clk,
     input  logic                         rst_n,
     // A single signal to control accumulation in all PEs.
     // The control unit must assert this to perform the MAC operation.
     // To clear the array, pulse rst_n.
-    input  logic                         accum_en_i,
+    input  logic [ROWS-1:0]                  accum_en_i, // Accumulation enable for each row
 
     // Input operand streams. The controller must feed these with the
     // correct timing (skew).
@@ -95,6 +103,7 @@ module pe_array #(
     // Internal wires for connecting PEs grid.
     logic [DATA_WIDTH-1:0] pe_a_wires [ROWS-1:0][COLS:0];
     logic [DATA_WIDTH-1:0] pe_b_wires [ROWS:0][COLS-1:0];
+    logic                  pe_accum_wires [ROWS-1:0][COLS:0];
 
     // Connect top-level inputs to the wires at the array boundary.
     assign pe_b_wires[0] = operand_b_i;
@@ -102,10 +111,10 @@ module pe_array #(
     generate
       for (r_assign = 0; r_assign < ROWS; r_assign++) begin
         assign pe_a_wires[r_assign][0] = operand_a_i[r_assign];
+        assign pe_accum_wires[r_assign][0] = accum_en_i[r_assign];
       end
     endgenerate
 
-    // Generate 4x4 array of PEs.
     genvar i, j;
     generate
         for (i = 0; i < ROWS; i++) begin : gen_row
@@ -117,7 +126,8 @@ module pe_array #(
                 ) pe_inst (
                     .clk(clk),
                     .rst_n(rst_n),
-                    .accum_en_i(accum_en_i),
+                    .accum_en_i(pe_accum_wires[i][j]),
+                    .accum_en_o(pe_accum_wires[i][j+1]),
 
                     .operand_a_i(pe_a_wires[i][j]),
                     .operand_b_i(pe_b_wires[i][j]),

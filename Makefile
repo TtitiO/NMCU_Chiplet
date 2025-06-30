@@ -2,13 +2,24 @@
 
 # Compiler and flags
 VERILATOR = verilator
-VERILATOR_FLAGS = -Wall --cc --exe --build -j 0 \
+DEBUG ?= 0
+ifeq ($(DEBUG), 1)
+	VERILATOR_FLAGS = +define+DEBUG_MODE=1 -Wall --cc --exe --build -j 0 \
 		--top-module nmcu_tb \
 		--timescale 1ns/1ps \
 		--timing \
 		-Wno-fatal \
 		+incdir+src/include \
 		--trace
+else
+	VERILATOR_FLAGS = -Wall --cc --exe --build -j 0 \
+		--top-module nmcu_tb \
+		--timescale 1ns/1ps \
+		--timing \
+		-Wno-fatal \
+		+incdir+src/include \
+		--trace
+endif
 
 # Source files
 SRC_DIR = src
@@ -49,6 +60,9 @@ compile:
 # Run the simulation
 run:
 	./$(OBJ_DIR)/Vnmcu_tb
+
+run-debug:
+	$(MAKE) run
 
 # Clean build artifacts
 clean:

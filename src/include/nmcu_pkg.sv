@@ -7,23 +7,43 @@ package nmcu_pkg;
     // Common Parameters
     parameter DATA_WIDTH      = 32;       // Data bus width (e.g., for integers or floats)
     parameter ADDR_WIDTH      = 32;       // Address bus width
-    parameter LEN_WIDTH       = 8;        // Length/burst size width
+    parameter LEN_WIDTH       = 32;       // Length/burst size width
     parameter PSUM_WIDTH      = 2 * DATA_WIDTH;
-
-    // PE Array Parameters
-    parameter PE_ROWS         = 4;        // Number of PE rows (for future Systolic Array)
-    parameter PE_COLS         = 4;        // Number of PE columns (for future Systolic Array)
-    parameter MAC_DATA_WIDTH  = DATA_WIDTH; // Data width for MAC operations (input/output)
 
     // Cache Parameters (TODO: simplified for now, revisit for future)
     parameter CACHE_LINE_SIZE = 64;       // Cache line size in bytes (for future)
     parameter CACHE_NUM_SETS  = 256;      // Number of cache sets (for future)
-    parameter MEM_SIZE_WORDS  = 16384;    // 16K words for TB simulation
+    parameter MEM_SIZE_WORDS = 16'h8000;  // 64K words for TB simulation
     parameter MEM_LATENCY     = 5;        // Latency for simulated main memory
 
     // Derived Parameters
     localparam DATA_BYTES_PER_WORD = DATA_WIDTH / 8;
     localparam CACHE_LINE_WORDS    = CACHE_LINE_SIZE / DATA_BYTES_PER_WORD;
+
+    // --- FC Layer Dimensions for Testbench ---
+    // Centralized here from the testbench for consistency.
+    // C[BATCH_SIZE][OUTPUT_NEURONS] = A[BATCH_SIZE][INPUT_FEATURES] * B[INPUT_FEATURES][OUTPUT_NEURONS]
+    parameter BATCH_SIZE        = 5;   // How many input vectors to process at once (N)
+    parameter INPUT_FEATURES    = 5;   // Dimension of the input vector (K)
+    parameter OUTPUT_NEURONS    = 5;   // Dimension of the output vector (M)
+
+    // --- PE Array Parameters ---
+    // These define the physical size of the systolic array.
+    // It's good practice to link them to the problem size for initial verification.
+    // This configuration maps the entire output matrix to the PE array at once.
+    parameter PE_ROWS         = BATCH_SIZE;     // Set to 4 to match the number of output rows
+    parameter PE_COLS         = OUTPUT_NEURONS; // Set to 4 to match the number of output columns
+
+    // --- Explicit Matrix Type Definitions ---
+    // These typedefs resolve the Verilator C++ compilation error by providing
+    // unambiguous types for multi-dimensional arrays passed to tasks.
+    typedef logic signed [DATA_WIDTH-1:0] input_matrix_t  [0:BATCH_SIZE-1][0:INPUT_FEATURES-1];
+    typedef logic signed [DATA_WIDTH-1:0] weight_matrix_t [0:INPUT_FEATURES-1][0:OUTPUT_NEURONS-1];
+    typedef logic [DATA_WIDTH-1:0] output_matrix_t [0:BATCH_SIZE-1][0:OUTPUT_NEURONS-1];
+
+    // --- Add basic type definitions for clarity and correctness ---
+    typedef logic signed [DATA_WIDTH-1:0] data_type; // Standard data word
+    typedef logic [PSUM_WIDTH-1:0] psu_type; // Partial sum accumulator
 
     // Define common AXI-like interfaces for internal communication
     // Request/Response structure for memory operations
