@@ -10,6 +10,7 @@ module nmcu #(
     parameter PSUM_WIDTH  = nmcu_pkg::PSUM_WIDTH,
     parameter PE_ROWS     = nmcu_pkg::PE_ROWS,
     parameter PE_COLS     = nmcu_pkg::PE_COLS
+    // parameter INPUT_FEATURES = nmcu_pkg::INPUT_FEATURES
 )(
     input  logic                            clk,
     input  logic                            rst_n,
@@ -67,6 +68,7 @@ module nmcu #(
         .PSUM_WIDTH(PSUM_WIDTH),
         .PE_ROWS(PE_ROWS),
         .PE_COLS(PE_COLS)
+        // .INPUT_FEATURES(nmcu_pkg::INPUT_FEATURES)
     ) pe_if_inst (
         .clk(clk),
         .rst_n(rst_n),

@@ -9,11 +9,13 @@ module pe_array_interface #(
     parameter PSUM_WIDTH       = nmcu_pkg::PSUM_WIDTH,
     parameter PE_ROWS          = nmcu_pkg::PE_ROWS,
     parameter PE_COLS          = nmcu_pkg::PE_COLS,
-    // This latency is the sum of:wh
-    // 1. Systolic array propagation delay: (PE_ROWS + PE_COLS - 2)
-    // 2. PE internal pipeline depth: 2 cycles (reg for operands, reg for psum)
-    // 3. Interface pipeline stage: 1 cycle (input registers in this module)
-    parameter PIPELINE_LATENCY = (PE_ROWS + PE_COLS - 2) + 5
+    parameter INPUT_FEATURES   = nmcu_pkg::INPUT_FEATURES,
+    // Pipeline latency is the sum of:
+    // 1. Computation cycles (K): INPUT_FEATURES cycles for the inner dimension.
+    // 2. Systolic array fill/drain time: (PE_ROWS + PE_COLS - 2) cycles.
+    // 3. PE internal pipeline depth: 2 cycles (reg for operands, reg for psum).
+    // 4. Interface pipeline stage: 1 cycle (input registers in this module).
+    parameter PIPELINE_LATENCY = INPUT_FEATURES + (PE_ROWS + PE_COLS - 2) + 2 + 1
 ) (
     input  logic                            clk,
     input  logic                            rst_n,

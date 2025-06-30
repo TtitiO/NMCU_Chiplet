@@ -1,22 +1,23 @@
 //********************************************************************************
 // Function: Testbench for the NMCU, comparing a traditional vs. accelerated
-//           Fully Connected (FC) Layer operation during inference.
+//           two-layer Fully Connected (FC) Inference operation.
 //
 // Description:
-//   This testbench models the core computation of a neural network's
-//   fully connected layer:
+//   This testbench models a two-layer FC operation:
 //
-//      Output_Logits = Input_Activations * Weight_Matrix
+//      MatMul -> ReLU -> MatMul
 //
 //   It runs two scenarios to demonstrate the NMCU's performance benefit:
 //   1. Traditional CPU Model: The CPU issues individual LOAD/STORE operations
-//      for every data element, simulating a memory bottleneck.
-//   2. NMCU-Accelerated Model: The CPU issues a single INSTR_MATMUL instruction,
-//      offloading the entire computation to the NMCU.
+//      for every data element and performs all calculations (MatMul, ReLU).
+//   2. NMCU-Accelerated Model: The CPU issues INSTR_MATMUL instructions
+//      to offload the heavy computation and performs the lighter-weight
+//      ReLU operations on the results.
 //
-//   The test measures and compares the cycle counts for both scenarios.
+//   The test measures and compares the total cycle counts for both scenarios.
 //
-// Revision: v3.1 - Corrected SystemVerilog syntax for Verilator
+// Revision: v4.0 - Extended to a two-layer FC test (MatMul->ReLU->MatMul->ReLU)
+//                  and removed bias addition.
 //********************************************************************************
 `timescale 1ns / 1ps
 
@@ -26,16 +27,20 @@ module nmcu_tb;
     import instr_pkg::*;
 
     // --- FC Layer Test Parameters ---
-    // C[BATCH_SIZE][OUTPUT_NEURONS] = A[BATCH_SIZE][INPUT_FEATURES] * B[INPUT_FEATURES][OUTPUT_NEURONS]
-    localparam TIMEOUT_CYCLES    = 5000000; // Increased for traditional test
+    // Layer 1: C1[BATCH_SIZE][OUTPUT_NEURONS] = A[BATCH_SIZE][INPUT_FEATURES] * B1[INPUT_FEATURES][OUTPUT_NEURONS]
+    // Layer 2: C2[BATCH_SIZE][OUTPUT_NEURONS] = C1[BATCH_SIZE][OUTPUT_NEURONS] * B2[OUTPUT_NEURONS][OUTPUT_NEURONS]
+    localparam TIMEOUT_CYCLES    = 10000000; // Increased for traditional test
 
     // --- Testbench Control ---
     localparam bit PRINT_MATRICES = (BATCH_SIZE * INPUT_FEATURES * OUTPUT_NEURONS < 512);
 
+
     // --- Define memory layout ---
-    localparam ADDR_INPUTS_BASE  = 'h0000;
-    localparam ADDR_WEIGHTS_BASE = 'h1000;
-    localparam ADDR_OUTPUTS_BASE = 'h2000;
+    localparam ADDR_INPUTS_BASE   = 'h0000; // Input Activations
+    localparam ADDR_WEIGHTS1_BASE = 'h1000; // Layer 1 Weights
+    localparam ADDR_WEIGHTS2_BASE = 'h3000; // Layer 2 Weights
+    localparam ADDR_OUTPUTS1_BASE = 'h4000; // Intermediate Output (After Layer 1)
+    localparam ADDR_OUTPUTS2_BASE = 'h5000; // Final Output (After Layer 2)
 
 
     // --- Clock and Reset ---
@@ -53,12 +58,18 @@ module nmcu_tb;
     // --- FC Layer Data Matrices ---
     // A: Input Activations
     input_matrix_t fc_inputs;
-    // B: Layer Weights
-    weight_matrix_t fc_weights;
-    // C: DUT Output
-    output_matrix_t dut_outputs;
-    // C: Golden Reference Output
-    output_matrix_t golden_outputs;
+    // B1: Layer 1 Weights
+    weight_matrix_t fc_weights1;
+    // B2: Layer 2 Weights (Input Features = Output Neurons from Layer 1)
+    typedef data_type weight_matrix2_t [OUTPUT_NEURONS][OUTPUT_NEURONS];
+    weight_matrix2_t fc_weights2;
+    // C1: Intermediate DUT Output
+    output_matrix_t dut_outputs1;
+    // C2: Final DUT Output
+    output_matrix_t dut_outputs2;
+    // Golden Reference Outputs
+    output_matrix_t golden_outputs1; // Intermediate (after Layer 1)
+    output_matrix_t golden_outputs2; // Final (after Layer 2)
 
     // --- Performance Counters ---
     longint traditional_cycles;
@@ -89,12 +100,8 @@ module nmcu_tb;
         // 2. Prepare shared data for both tests
         initialize_fc_data();
         calculate_golden_result();
-
-        // 3. Run the baseline test (Traditional CPU-centric approach)
-        run_traditional_cpu_test();
-        // 4. Run the accelerated test (NMCU hardware offload)
         run_nmcu_accelerated_test();
-
+        // run_traditional_cpu_test();
         // 5. Compare results and finish simulation
         summarize_performance();
         $display("T=%0t [%m] Simulation finished successfully.", $time);
@@ -111,50 +118,81 @@ module nmcu_tb;
     task automatic run_traditional_cpu_test();
         int error_count = 0;
         longint start_time, end_time;
-        psu_type accumulator;
+        logic signed [PSUM_WIDTH-1:0] accumulator;
         data_type val_a, val_b;
+        data_type val_bias;
 
         $display("");
         $display("T=%0t [%m] ================================================================", $time);
-        $display("T=%0t [%m]  SCENARIO 1: Traditional CPU-Centric Matrix Multiplication  ", $time);
-        $display("T=%0t [%m]  (CPU issues individual LOAD/STOREs for every operation)     ", $time);
+        $display("T=%0t [%m]  SCENARIO 1: Traditional CPU-Centric FC Layer               ", $time);
+        $display("T=%0t [%m]  (CPU performs MatMul, Bias-Add, and ReLU via LOAD/STOREs)  ", $time);
         $display("T=%0t [%m] ================================================================", $time);
 
         // 1. Load the initial matrices into the NMCU's memory (this is common setup)
-        load_matrices_to_nmcu();
+        load_all_data_to_memory();
 
         // 2. Perform the matrix multiplication using individual LOADs and STOREs
         $display("T=%0t [%m] ====== Performing MatMul via CPU LOAD/STORE loop ======", $time);
         start_time = $time;
         for (int i = 0; i < BATCH_SIZE; i = i + 1) begin
             for (int j = 0; j < OUTPUT_NEURONS; j = j + 1) begin
-                accumulator = 0; // Reset accumulator for each output element
+                accumulator = 0;
                 for (int k = 0; k < INPUT_FEATURES; k = k + 1) begin
-                    // CPU must fetch one element from Matrix A
-                    send_instr(INSTR_LOAD, ADDR_INPUTS_BASE + (i * INPUT_FEATURES + k), '0, '0, '0, 1, '0, '0, '0);
+                    // Simulate CPU reading from memory
+                    $display("The address to load in matrix A[%0d][%0d] is %h", i, k, ADDR_INPUTS_BASE + (i * INPUT_FEATURES + k));
+                    $display("The address to load in matrix B[%0d][%0d] is %h", k, j, ADDR_WEIGHTS1_BASE + (k * OUTPUT_NEURONS + j));
+                    send_instr(INSTR_LOAD, ADDR_INPUTS_BASE + (i * INPUT_FEATURES + k), 0, 0, 0, 0, 0, 0, 0);
                     wait_for_response();
                     val_a = received_data;
 
-                    // CPU must fetch one element from Matrix B
-                    send_instr(INSTR_LOAD, ADDR_WEIGHTS_BASE + (k * OUTPUT_NEURONS + j), '0, '0, '0, 1, '0, '0, '0);
+                    send_instr(INSTR_LOAD, ADDR_WEIGHTS1_BASE + (k * OUTPUT_NEURONS + j), 0, 0, 0, 0, 0, 0, 0);
                     wait_for_response();
                     val_b = received_data;
 
-                    // CPU performs the multiply-accumulate operation
                     accumulator += val_a * val_b;
                 end
-                // CPU must store the final calculated result back to memory
-                send_instr(INSTR_STORE, ADDR_OUTPUTS_BASE + (i * OUTPUT_NEURONS + j), '0, '0, accumulator, 1, '0, '0, '0);
+                // Simulate CPU writing result back to memory
+                send_instr(INSTR_STORE, ADDR_OUTPUTS1_BASE + (i * OUTPUT_NEURONS + j), 0, 0, accumulator, 0, 0, 0, 0);
+                wait_for_response();
+            end
+        end
+        // 3. Perform Layer 2 (MatMul -> ReLU) using individual LOADs and STOREs
+        $display("T=%0t [%m] ====== Performing Layer 2 (MatMul -> ReLU) via CPU loop ======", $time);
+        for (int i = 0; i < BATCH_SIZE; i = i + 1) begin
+            for (int j = 0; j < OUTPUT_NEURONS; j = j + 1) begin
+                accumulator = 0;
+                for (int k = 0; k < OUTPUT_NEURONS; k = k + 1) begin // Layer 2 uses OUTPUT_NEURONS for inner dimension
+                    // Load from intermediate output
+                    $display("The address to load in matrix A[%0d][%0d] is %h", i, k, ADDR_OUTPUTS1_BASE + (i * OUTPUT_NEURONS + k));
+                    $display("The address to load in matrix B[%0d][%0d] is %h", k, j, ADDR_WEIGHTS2_BASE + (k * OUTPUT_NEURONS + j));
+                    send_instr(INSTR_LOAD, ADDR_OUTPUTS1_BASE + (i * OUTPUT_NEURONS + k), 0, 0, 0, 0, 0, 0, 0);
+                    wait_for_response();
+                    val_a = received_data;
+                    $display("Loaded value A[%0d][%0d] = %0d", i, k, val_a);
+
+                    // Load from second weight matrix
+                    send_instr(INSTR_LOAD, ADDR_WEIGHTS2_BASE + (k * OUTPUT_NEURONS + j), 0, 0, 0, 0, 0, 0, 0);
+                    wait_for_response();
+                    val_b = received_data;
+                    $display("T: %0t Loaded value B[%0d][%0d] = %0d", $time, k, j, val_b);
+                    accumulator += val_a * val_b;
+
+                end
+                // Apply final ReLU
+                if (accumulator < 0) accumulator = 0;
+
+                // Store final result
+                send_instr(INSTR_STORE, ADDR_OUTPUTS2_BASE + (i * OUTPUT_NEURONS + j), 0, 0, accumulator, 0, 0, 0, 0);
                 wait_for_response();
             end
         end
         end_time = $time;
         traditional_cycles = (end_time - start_time) / 10;
-        $display("T=%0t [%m] INFO: Traditional CPU operation complete.", $time);
+        $display("T=%0t [%m] INFO: Traditional CPU FC Layer operation complete.", $time);
         $display("T=%0t [%m] >>>>> PERFORMANCE: Traditional approach took %0d cycles. <<<<<", $time, traditional_cycles);
 
         // 3. Verify the results (optional for this path, but good for sanity check)
-        error_count = verify_results();
+        verify_results(error_count);
         if (error_count > 0) begin
             $display("T=%0t [%m] ****** TRADITIONAL TEST FAILED with %0d errors! ******", $time, error_count);
         end else begin
@@ -168,44 +206,75 @@ module nmcu_tb;
     // *****************************************************************
     task automatic run_nmcu_accelerated_test();
         int error_count = 0;
-        longint matmul_start_time, matmul_end_time;
+        longint start_time, end_time;
+        logic signed [PSUM_WIDTH-1:0] intermediate_val, final_val;
+        data_type bias_val;
         $display("");
         $display("T=%0t [%m] ================================================================", $time);
-        $display("T=%0t [%m]  SCENARIO 2: NMCU-Accelerated Matrix Multiplication         ", $time);
-        $display("T=%0t [%m]  (CPU issues a single MATMUL instruction to offload work)   ", $time);
+        $display("T=%0t [%m]  SCENARIO 2: NMCU-Accelerated Matrix Multiplication            ", $time);
+        $display("T=%0t [%m]  (NMCU for MatMul, CPU for Bias-Add and ReLU)                  ", $time);
         $display("T=%0t [%m]  Layer Dimensions: BATCH_SIZE=%0d, IN_FEAT=%0d, OUT_NEURONS=%0d", $time, BATCH_SIZE, INPUT_FEATURES, OUTPUT_NEURONS);
         $display("T=%0t [%m] ================================================================", $time);
 
         // 1. Load the input and weight matrices into the NMCU's memory
-        load_matrices_to_nmcu();
+        load_all_data_to_memory();
 
+
+        // --- Part 1: Offload Matrix Multiplication to NMCU ---
         // 2. Send the single MATMUL instruction and MEASURE PERFORMANCE
-        $display("T=%0t [%m] ====== Performing Matrix Multiplication via NMCU ======", $time);
-        matmul_start_time = $time;
-        send_instr(INSTR_MATMUL, ADDR_INPUTS_BASE, ADDR_WEIGHTS_BASE, ADDR_OUTPUTS_BASE, '0, '0, BATCH_SIZE, OUTPUT_NEURONS, INPUT_FEATURES);
+        $display("T=%0t [%m] ====== Performing Layer 1 MatMul via NMCU ======", $time);
+        start_time = $time;
+        send_instr(INSTR_MATMUL, ADDR_INPUTS_BASE, ADDR_WEIGHTS1_BASE, ADDR_OUTPUTS1_BASE, '0, '0, BATCH_SIZE, OUTPUT_NEURONS, INPUT_FEATURES);
         wait_for_response();
-        matmul_end_time = $time;
-        if (received_status != 2'b00) begin
-             $fatal(1, "T=%0t [%m] FATAL: MATMUL operation FAILED. Status: %b", $time, received_status);
+        if (received_status != 2'b00) $fatal(1, "T=%0t [%m] FATAL: MATMUL 1 FAILED. Status: %b", $time, received_status);
+        $display("T=%0t [%m] INFO: NMCU MATMUL 1 operation complete.", $time);
+
+        // --- Part 2: CPU performs Bias-Add and ReLU post-processing ---
+        $display("T=%0t [%m] ====== Performing Bias-Add and ReLU via CPU ======", $time);
+        for (int i = 0; i < BATCH_SIZE; i = i + 1) begin
+            for (int j = 0; j < OUTPUT_NEURONS; j = j + 1) begin
+
+                // CPU fetches the intermediate result from the NMCU
+                send_instr(INSTR_LOAD, ADDR_OUTPUTS1_BASE + (i * OUTPUT_NEURONS + j), '0, '0, '0, 1, '0, '0, '0);
+                wait_for_response();
+                intermediate_val = received_data;
+                if (intermediate_val < 0) begin
+                    intermediate_val = 0; // ReLU
+                end
+                // CPU writes the final result back, overwriting the intermediate value
+                send_instr(INSTR_STORE, ADDR_OUTPUTS1_BASE + (i * OUTPUT_NEURONS + j), '0, '0, data_type'(intermediate_val), 1, '0, '0, '0);
+                wait_for_response();
+            end
         end
-        nmcu_cycles = (matmul_end_time - matmul_start_time) / 10;
-        $display("T=%0t [%m] INFO: NMCU MATMUL operation complete.", $time);
+        // --- Part 3: Offload Layer 2 MatMul to NMCU ---
+        $display("T=%0t [%m] ====== Performing Layer 2 MatMul via NMCU ======", $time);
+        send_instr(INSTR_MATMUL, ADDR_OUTPUTS1_BASE, ADDR_WEIGHTS2_BASE, ADDR_OUTPUTS2_BASE, '0, '0, BATCH_SIZE, OUTPUT_NEURONS, OUTPUT_NEURONS);
+        wait_for_response();
+        if (received_status != 2'b00) $fatal(1, "T=%0t [%m] FATAL: MATMUL 2 FAILED. Status: %b", $time, received_status);
+        $display("T=%0t [%m] INFO: NMCU MATMUL 2 operation complete.", $time);
+
+        end_time = $time;
+        nmcu_cycles = (end_time - start_time) / 10;
+
+        $display("T=%0t [%m] INFO: NMCU-accelerated 2-Layer FC operation complete.", $time);
         $display("T=%0t [%m] >>>>> PERFORMANCE: NMCU-accelerated approach took %0d cycles. <<<<<", $time, nmcu_cycles);
 
-        // 3. Read back the results from the NMCU and verify against the golden model
-        error_count = verify_results();
+        // 4. Read back the final results and verify against the golden model
+        verify_results(error_count);
 
-        // 4. Display results and summary
-        if (PRINT_MATRICES) begin
-            print_input_matrix("Input Activations (A)", fc_inputs);
-            print_weight_matrix("Weights (B)", fc_weights);
-            print_output_matrix("Golden Output (C)", golden_outputs);
-            print_output_matrix("DUT Output (C)", dut_outputs);
-        end
         if (error_count == 0) begin
             $display("T=%0t [%m] ****** NMCU TEST PASSED! ******", $time);
         end else begin
             $display("T=%0t [%m] ****** NMCU TEST FAILED with %0d errors! ******", $time, error_count);
+        end
+
+        // 5. Print matrices if enabled
+        if (PRINT_MATRICES) begin
+            print_input_matrix("Input Activations (A)", fc_inputs);
+            print_weight_matrix("Weights 1 (B1)", fc_weights1);
+            print_weight2_matrix("Weights 2 (B2)", fc_weights2);
+            print_output_matrix("Golden Output (C2)", golden_outputs2);
+            print_output_matrix("DUT Output (C2)", dut_outputs2);
         end
     endtask
 
@@ -216,9 +285,11 @@ module nmcu_tb;
         real speedup;
         $display("");
         $display("T=%0t [%m] //==============================================================\\", $time);
-        $display("T=%0t [%m] ||                  PERFORMANCE COMPARISON SUMMARY                ||", $time);
+        $display("T=%0t [%m] ||             TWO-LAYER FC PERFORMANCE SUMMARY                ||", $time);
         $display("T=%0t [%m] \\==============================================================//", $time);
-        $display("T=%0t [%m]   Layer Dimensions: BATCH_SIZE=%0d, IN_FEAT=%0d, OUT_NEURONS=%0d", $time, BATCH_SIZE, INPUT_FEATURES, OUTPUT_NEURONS);
+        $display("T=%0t [%m]   Operation: Output = ReLU(ReLU(Input*Weights1)*Weights2)", $time);
+        $display("T=%0t [%m]   Layer 1 Dim: BATCH=%0d, IN_FEAT=%0d, OUT_NEURONS=%0d", $time, BATCH_SIZE, INPUT_FEATURES, OUTPUT_NEURONS);
+        $display("T=%0t [%m]   Layer 2 Dim: BATCH=%0d, IN_FEAT=%0d, OUT_NEURONS=%0d", $time, BATCH_SIZE, OUTPUT_NEURONS, OUTPUT_NEURONS);
         $display("T=%0t [%m] ----------------------------------------------------------------", $time);
         $display("T=%0t [%m]   Traditional CPU-Centric Cycles : %0d", $time, traditional_cycles);
         $display("T=%0t [%m]   NMCU-Accelerated Cycles        : %0d", $time, nmcu_cycles);
@@ -233,68 +304,93 @@ module nmcu_tb;
     endtask
 
     task automatic initialize_fc_data();
-        $display("T=%0t [%m] ====== Initializing FC Layer Data ======", $time);
+        $display("T=%0t [%m] ====== Initializing FC Layer Data (Inputs, Weights, Bias) ======", $time);
         for (int i = 0; i < BATCH_SIZE; i++) begin
             for (int j = 0; j < INPUT_FEATURES; j++) begin
-                fc_inputs[i][j] = $urandom_range(0, 15); // Use small numbers for readability
+                fc_inputs[i][j] = $urandom_range(7, 0);
             end
         end
         for (int i = 0; i < INPUT_FEATURES; i++) begin
             for (int j = 0; j < OUTPUT_NEURONS; j++) begin
-                fc_weights[i][j] = $urandom_range(0, 15);
+                fc_weights1[i][j] = $urandom_range(7, 0);
+            end
+        end
+        for (int i = 0; i < OUTPUT_NEURONS; i++) begin
+            for (int j = 0; j < OUTPUT_NEURONS; j++) begin
+                fc_weights2[i][j] = $urandom_range(7, 0);
             end
         end
     endtask
 
     task automatic calculate_golden_result();
-        $display("T=%0t [%m] ====== Calculating Golden Reference Result ======", $time);
+        logic signed [PSUM_WIDTH-1:0] intermediate_sum;
+        $display("T=%0t [%m] ====== Calculating Golden Reference Result (MatMul + Bias + ReLU) ======", $time);
         for (int i = 0; i < BATCH_SIZE; i++) begin
             for (int j = 0; j < OUTPUT_NEURONS; j++) begin
-                golden_outputs[i][j] = 0; // Initialize sum
+                intermediate_sum = 0;
                 for (int k = 0; k < INPUT_FEATURES; k++) begin
-                    golden_outputs[i][j] += fc_inputs[i][k] * fc_weights[k][j];
+                    intermediate_sum += fc_inputs[i][k] * fc_weights1[k][j];
                 end
+                golden_outputs1[i][j] = data_type'((intermediate_sum < 0) ? 0 : intermediate_sum);
+            end
+        end
+        for (int i = 0; i < BATCH_SIZE; i++) begin
+            for (int j = 0; j < OUTPUT_NEURONS; j++) begin
+                intermediate_sum = 0;
+                for (int k = 0; k < OUTPUT_NEURONS; k++) begin
+                    intermediate_sum += golden_outputs1[i][k] * fc_weights2[k][j];
+                end
+                golden_outputs2[i][j] = data_type'(intermediate_sum);
             end
         end
     endtask
 
-    task automatic load_matrices_to_nmcu();
-        $display("\n T=%0t [%m] ====== Loading Input Matrix (Activations) ======", $time);
+    task automatic load_all_data_to_memory();
+        // Load Input Activations
+        $display("T=%0t [%m] ====== Loading Input Matrix (Activations) ======", $time);
         for (int i = 0; i < BATCH_SIZE; i++) begin
             for (int j = 0; j < INPUT_FEATURES; j++) begin
                 send_instr(INSTR_STORE, ADDR_INPUTS_BASE + (i * INPUT_FEATURES + j), '0, '0, fc_inputs[i][j], 1, '0, '0, '0);
                 wait_for_response();
             end
         end
-        $display("\n T=%0t [%m] ====== Loading Weight Matrix ======", $time);
+        // Load Weights 1
+        $display("T=%0t [%m] ====== Loading Weight Matrix 1 ======", $time);
         for (int i = 0; i < INPUT_FEATURES; i++) begin
             for (int j = 0; j < OUTPUT_NEURONS; j++) begin
-                send_instr(INSTR_STORE, ADDR_WEIGHTS_BASE + (i * OUTPUT_NEURONS + j), '0, '0, fc_weights[i][j], 1, '0, '0, '0);
+                send_instr(INSTR_STORE, ADDR_WEIGHTS1_BASE + (i * OUTPUT_NEURONS + j), '0, '0, fc_weights1[i][j], 1, '0, '0, '0);
+                wait_for_response();
+            end
+        end
+        // Load Weights 2
+        $display("T=%0t [%m] ====== Loading Weight Matrix 2 ======", $time);
+        for (int i = 0; i < OUTPUT_NEURONS; i++) begin
+            for (int j = 0; j < OUTPUT_NEURONS; j++) begin
+                send_instr(INSTR_STORE, ADDR_WEIGHTS2_BASE + (i * OUTPUT_NEURONS + j), '0, '0, fc_weights2[i][j], 1, '0, '0, '0);
                 wait_for_response();
             end
         end
     endtask
 
-    function int verify_results();
-        int errors = 0;
-        $display("\n T=%0t [%m] ====== Verifying Results ======", $time);
+    task automatic verify_results(output int errors);
+        errors = 0;
+        $display("\n T=%0t [%m] ====== Verifying Final Results (from Addr: %h) ======", $time, ADDR_OUTPUTS2_BASE);
         for (int i = 0; i < BATCH_SIZE; i = i + 1) begin
             for (int j = 0; j < OUTPUT_NEURONS; j = j + 1) begin
-                send_instr(INSTR_LOAD, ADDR_OUTPUTS_BASE + (i * OUTPUT_NEURONS + j), '0, '0, '0, 1, '0, '0, '0);
+                send_instr(INSTR_LOAD, ADDR_OUTPUTS2_BASE + (i * OUTPUT_NEURONS + j), '0, '0, '0, 1, '0, '0, '0);
                 wait_for_response();
-                dut_outputs[i][j] = received_data;
-                if (dut_outputs[i][j] != golden_outputs[i][j]) begin
-                    $display("T=%0t [%m] FATAL: Result mismatch at C[%0d][%0d]. Expected %0d, got %0d",
-                           $time, i, j, golden_outputs[i][j], dut_outputs[i][j]);
+                dut_outputs2[i][j] = received_data;
+                if (dut_outputs2[i][j] != golden_outputs2[i][j]) begin
+                    $display("T=%0t [%m] FATAL: Result mismatch at C2[%0d][%0d]. Expected %0d, got %0d",
+                           $time, i, j, golden_outputs2[i][j], dut_outputs2[i][j]);
                     errors++;
                 end else begin
-                    $display("T=%0t [%m] INFO: Result at C[%0d][%0d] = %0d (PASSED)",
-                            $time, i, j, dut_outputs[i][j]);
+                    $display("T=%0t [%m] INFO: Result at C2[%0d][%0d] = %0d (PASSED)",
+                            $time, i, j, dut_outputs2[i][j]);
                 end
             end
         end
-        return errors;
-    endfunction
+    endtask
 
     //----------------------------------------------------------------
     // Utility and Interface Tasks
@@ -342,7 +438,7 @@ module nmcu_tb;
         cpu_instr_valid = 0;
     endtask
 
-    logic [PSUM_WIDTH-1:0] received_data;
+    logic [DATA_WIDTH-1:0] received_data;
     logic [1:0]            received_status;
     task automatic wait_for_response();
         int timeout_counter = 0;
@@ -380,7 +476,18 @@ module nmcu_tb;
             end
             $display("%s", row_str);
         end
+    endtask
 
+    task automatic print_weight2_matrix(input string name, input weight_matrix2_t matrix);
+        $display("\n T=%0t [%m] ====== %s [%0d x %0d] ======", $time, name,
+                 OUTPUT_NEURONS, OUTPUT_NEURONS);
+        for (int i = 0; i < OUTPUT_NEURONS; i = i + 1) begin
+            string row_str = "|";
+            for (int j = 0; j < OUTPUT_NEURONS; j = j + 1) begin
+                row_str = {row_str, $sformatf(" %5d |", matrix[i][j])};
+            end
+            $display("%s", row_str);
+        end
     endtask
 
     task automatic print_output_matrix(input string name, input output_matrix_t matrix);
@@ -393,6 +500,16 @@ module nmcu_tb;
             end
             $display("%s", row_str);
         end
+    endtask
+    task automatic reset_dut();
+        $display("T=%0t [%m] ====== Applying DUT Reset ======", $time);
+        rst_n = 1'b0;
+        // Keep reset asserted for a few cycles
+        repeat (5) @(posedge clk);
+        rst_n = 1'b1;
+        // Add a small delay for signals to stabilize after reset
+        #10;
+        $display("T=%0t [%m] ====== DUT Reset Released ======", $time);
     endtask
 
 endmodule

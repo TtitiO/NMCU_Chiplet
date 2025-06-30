@@ -43,8 +43,15 @@ module memory_interface #(
 
             // Manage latency pipe for reads
             rvalid_pipe[0] <= req_i.valid && !req_i.write_en;
-            rdata_pipe[0]  <= mem[req_i.addr];
-            raddr_pipe[0] <= req_i.addr;
+            if (req_i.valid && !req_i.write_en) begin
+                // If it's a read request, store the data in the pipe
+                rdata_pipe[0]  <= mem[req_i.addr];
+                raddr_pipe[0] <= req_i.addr;
+            end else begin
+                // If not a read request, keep the previous data
+                rdata_pipe[0]  <= rdata_pipe[0];
+                raddr_pipe[0] <= raddr_pipe[0];
+            end
             for (int i = 1; i < LATENCY; i++) begin
                 rvalid_pipe[i] <= rvalid_pipe[i-1];
                 rdata_pipe[i]  <= rdata_pipe[i-1];
