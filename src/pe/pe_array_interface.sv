@@ -106,5 +106,5 @@ module pe_array_interface #(
             done_shift_reg <= {done_shift_reg[PIPELINE_LATENCY-1:0], pe_cmd_valid_i};
         end
     end
-    
+
 endmodule
