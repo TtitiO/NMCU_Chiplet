@@ -8,8 +8,8 @@ package instr_pkg;
     // Opcode definitions
     typedef enum logic [3:0] {
         INSTR_NOP       = 4'h0,
-        INSTR_LOAD      = 4'h1, // Load data from memory to internal register/cache
-        INSTR_STORE     = 4'h2, // Store data from internal register/cache to memory
+        CACHE_READ      = 4'h1, // Load data from memory to internal register/cache
+        CACHE_WRITE     = 4'h2, // Store data from internal register/cache to memory
         INSTR_MATMUL    = 4'h3, // Matrix Multiply-Accumulate or similar AI operation
         INSTR_HALT      = 4'hF  // Halt operation
     } opcode_t;
