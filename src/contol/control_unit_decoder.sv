@@ -187,11 +187,11 @@ module control_unit_decoder #(
             // Log when the final response is sent back to the CPU
             if (current_state == RESPOND_CPU && nmcu_resp_ready_i) begin
                  case(current_instruction_reg.opcode)
-                    INSTR_LOAD:
+                    CACHE_READ:
                         $display("T=%0t [CU] RESPOND_CPU: LOAD response - data=%0d", $time, cache_rdata_buffer);
-                    INSTR_MATMUL: 
+                    INSTR_MATMUL:
                         $display("T=%0t [CU] RESPOND_CPU: MATMUL complete.", $time);
-                    default: 
+                    default:
                         $display("T=%0t [CU] RESPOND_CPU: Instruction completed, moving to IDLE", $time);
                 endcase
             end
@@ -256,7 +256,7 @@ module control_unit_decoder #(
             IDLE: begin
                 if (instruction_valid_reg) begin
                     case (current_instruction_reg.opcode)
-                        INSTR_LOAD, INSTR_STORE: begin
+                        CACHE_READ, CACHE_WRITE: begin
                             next_state = EXECUTE_MEM;
                         end
                         INSTR_MATMUL: begin
@@ -277,7 +277,7 @@ module control_unit_decoder #(
                 cache_req_o.valid = !cache_req_outstanding;
                 cache_req_o.addr = current_instruction_reg.addr_a;
                 cache_req_o.len = current_instruction_reg.len;
-                cache_req_o.write_en = (current_instruction_reg.opcode == INSTR_STORE);
+                cache_req_o.write_en = (current_instruction_reg.opcode == CACHE_WRITE);
                 cache_req_o.wdata = current_instruction_reg.data;
 
                 if (cache_req_o.valid) begin
@@ -472,7 +472,7 @@ module control_unit_decoder #(
                 nmcu_response_o.status = (current_instruction_reg.opcode == INSTR_HALT) ? 2'b01 : 2'b00;
 
                 case(current_instruction_reg.opcode)
-                    INSTR_LOAD: begin
+                    CACHE_READ: begin
                         nmcu_response_o.data = cache_rdata_buffer;
                     end
                     INSTR_MATMUL: begin

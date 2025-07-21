@@ -114,12 +114,12 @@ module nmcu_tb;
             for (j = 0; j < OUTPUT_NEURONS; j = j + 1) begin
                 ps_sum = 0;
                 for (k = 0; k < INPUT_FEATURES; k = k + 1) begin
-                    send_instr(INSTR_LOAD, ADDR_INPUTS_BASE + (i * INPUT_FEATURES + k), '0, '0, '0, 1, '0, '0, '0);
+                    send_instr(CACHE_READ, ADDR_INPUTS_BASE + (i * INPUT_FEATURES + k), '0, '0, '0, 1, '0, '0, '0);
                     while (!nmcu_resp_valid) begin
                         @(posedge clk);
                     end
                     val_a = nmcu_response.data;
-                    send_instr(INSTR_LOAD, ADDR_WEIGHTS1_BASE + (k * OUTPUT_NEURONS + j), '0, '0, '0, 1, '0, '0, '0);
+                    send_instr(CACHE_READ, ADDR_WEIGHTS1_BASE + (k * OUTPUT_NEURONS + j), '0, '0, '0, 1, '0, '0, '0);
                     while (!nmcu_resp_valid) begin
                         @(posedge clk);
                     end
@@ -127,7 +127,7 @@ module nmcu_tb;
                     ps_sum += val_a * val_b;
                 end
                 if (ps_sum < 0) ps_sum = 0;
-                send_instr(INSTR_STORE, ADDR_OUTPUTS1_BASE + (i * OUTPUT_NEURONS + j), '0, '0, data_type'(ps_sum), 1, '0, '0, '0);
+                send_instr(CACHE_WRITE, ADDR_OUTPUTS1_BASE + (i * OUTPUT_NEURONS + j), '0, '0, data_type'(ps_sum), 1, '0, '0, '0);
                 wait_for_response();
             end
         end
@@ -143,13 +143,13 @@ module nmcu_tb;
             for (j = 0; j < OUTPUT_NEURONS; j = j + 1) begin
                 ps_sum = 0;
                 for (k = 0; k < OUTPUT_NEURONS; k = k + 1) begin
-                    send_instr(INSTR_LOAD, ADDR_OUTPUTS1_BASE + (i * OUTPUT_NEURONS + k), '0, '0, '0, 1, '0, '0, '0);
+                    send_instr(CACHE_READ, ADDR_OUTPUTS1_BASE + (i * OUTPUT_NEURONS + k), '0, '0, '0, 1, '0, '0, '0);
                     wait_for_response();
                     // while (!nmcu_resp_valid) begin
                     //     @(posedge clk);
                     // end
                     val_a = nmcu_response.data;
-                    send_instr(INSTR_LOAD, ADDR_WEIGHTS2_BASE + (k * OUTPUT_NEURONS + j), '0, '0, '0, 1, '0, '0, '0);
+                    send_instr(CACHE_READ, ADDR_WEIGHTS2_BASE + (k * OUTPUT_NEURONS + j), '0, '0, '0, 1, '0, '0, '0);
                     wait_for_response();
                     // while (!nmcu_resp_valid) begin
                     //     @(posedge clk);
@@ -158,7 +158,7 @@ module nmcu_tb;
                     ps_sum += val_a * val_b;
                 end
                 if (ps_sum < 0) ps_sum = 0;
-                send_instr(INSTR_STORE, ADDR_OUTPUTS2_BASE + (i * OUTPUT_NEURONS + j), '0, '0, data_type'(ps_sum), 1, '0, '0, '0);
+                send_instr(CACHE_WRITE, ADDR_OUTPUTS2_BASE + (i * OUTPUT_NEURONS + j), '0, '0, data_type'(ps_sum), 1, '0, '0, '0);
                 wait_for_response();
             end
         end
@@ -226,7 +226,7 @@ module nmcu_tb;
             for (j = 0; j < OUTPUT_NEURONS; j = j + 1) begin
 
                 // CPU fetches the intermediate result from the NMCU
-                send_instr(INSTR_LOAD, ADDR_OUTPUTS1_BASE + (i * OUTPUT_NEURONS + j), '0, '0, '0, 1, '0, '0, '0);
+                send_instr(CACHE_READ, ADDR_OUTPUTS1_BASE + (i * OUTPUT_NEURONS + j), '0, '0, '0, 1, '0, '0, '0);
                 // wait_for_response();
                 while (!nmcu_resp_valid) begin
                     @(posedge clk);
@@ -236,7 +236,7 @@ module nmcu_tb;
                     intermediate_val = 0; // ReLU
                 end
                 // CPU writes the final result back, overwriting the intermediate value
-                send_instr(INSTR_STORE, ADDR_OUTPUTS1_BASE + (i * OUTPUT_NEURONS + j), '0, '0, data_type'(intermediate_val), 1, '0, '0, '0);
+                send_instr(CACHE_WRITE, ADDR_OUTPUTS1_BASE + (i * OUTPUT_NEURONS + j), '0, '0, data_type'(intermediate_val), 1, '0, '0, '0);
                 wait_for_response();
             end
         end
@@ -349,7 +349,7 @@ module nmcu_tb;
         $display("T=%0t [%m] ====== Loading Input Matrix (Activations) ======", $time);
         for (i = 0; i < BATCH_SIZE; i++) begin
             for (j = 0; j < INPUT_FEATURES; j++) begin
-                send_instr(INSTR_STORE, ADDR_INPUTS_BASE + (i * INPUT_FEATURES + j), '0, '0, fc_inputs[i][j], 1, '0, '0, '0);
+                send_instr(CACHE_WRITE, ADDR_INPUTS_BASE + (i * INPUT_FEATURES + j), '0, '0, fc_inputs[i][j], 1, '0, '0, '0);
                 wait_for_response();
             end
         end
@@ -357,7 +357,7 @@ module nmcu_tb;
         $display("T=%0t [%m] ====== Loading Weight Matrix 1 ======", $time);
         for (i = 0; i < INPUT_FEATURES; i++) begin
             for (j = 0; j < OUTPUT_NEURONS; j++) begin
-                send_instr(INSTR_STORE, ADDR_WEIGHTS1_BASE + (i * OUTPUT_NEURONS + j), '0, '0, fc_weights1[i][j], 1, '0, '0, '0);
+                send_instr(CACHE_WRITE, ADDR_WEIGHTS1_BASE + (i * OUTPUT_NEURONS + j), '0, '0, fc_weights1[i][j], 1, '0, '0, '0);
                 wait_for_response();
             end
         end
@@ -365,7 +365,7 @@ module nmcu_tb;
         $display("T=%0t [%m] ====== Loading Weight Matrix 2 ======", $time);
         for (i = 0; i < OUTPUT_NEURONS; i++) begin
             for (j = 0; j < OUTPUT_NEURONS; j++) begin
-                send_instr(INSTR_STORE, ADDR_WEIGHTS2_BASE + (i * OUTPUT_NEURONS + j), '0, '0, fc_weights2[i][j], 1, '0, '0, '0);
+                send_instr(CACHE_WRITE, ADDR_WEIGHTS2_BASE + (i * OUTPUT_NEURONS + j), '0, '0, fc_weights2[i][j], 1, '0, '0, '0);
                 wait_for_response();
             end
         end
@@ -379,7 +379,7 @@ module nmcu_tb;
                  $time, ADDR_OUTPUTS2_BASE);
         for (i = 0; i < BATCH_SIZE; i = i + 1) begin
             for (j = 0; j < OUTPUT_NEURONS; j = j + 1) begin
-                send_instr(INSTR_LOAD, ADDR_OUTPUTS2_BASE + (i * OUTPUT_NEURONS + j),
+                send_instr(CACHE_READ, ADDR_OUTPUTS2_BASE + (i * OUTPUT_NEURONS + j),
                            '0, '0, '0, 1, '0, '0, '0);
                 wait_for_response();
                 dut_outputs2[i][j] = received_data;
